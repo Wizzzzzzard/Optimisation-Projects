@@ -1,0 +1,136 @@
+
+model CareDistances		!Give a name to your model.
+uses "mmxprs"; 		!Include the Xpress-Optimizer solver library.
+
+declarations
+num_districts= 47
+num_centres=6
+
+!This is a better way; so we have 'ranges' separate than numbers:
+districts=1..num_districts
+
+flow: dynamic array (districts,districts) of mpvar		!Flow variable - decision variable
+length: dynamic array (districts,districts) of real		!Arc length- walking distances
+connected: dynamic array (districts) of real   !check if node is connected with at least one of the centres
+
+supply: array(districts) of real
+demand: array(districts) of real
+
+end-declarations
+
+!Read data from file:
+fopen("CareDistances.csv",F_INPUT)
+readln
+readln
+while (not iseof) do
+	forall (i in districts) do
+		read(i)
+		forall (j in districts) do
+			create(flow(i,j))
+			create(length(i,j))
+			create(flow(j,i)) !create the edge other direction too
+			create(length(j,i)) !create the edge other direction too
+			read(",",length(i,j))
+			length(j,i):= length(i,j)
+		end-do
+	end-do
+end-do
+fclose(F_INPUT)
+
+! The centres correspond to the following nodes:
+! 71 is Node 1
+! 142 is Node 5
+! 280 is Node 12
+! 3451 is Node 17
+! 6846 is Node 18
+! 7649 is Node 31
+
+!check if node is connected with at least one of the centres- otherwise there is no connection between centre and client
+forall(i in districts) do
+   create(connected(i))
+   connected(i):=0
+   forall(j in districts) do
+     if (j=1 or j=5 or j=12 or j=17 or j=18 or j=31) then
+        if(length(i,j)>0) then
+           connected(i):=1
+        end-if
+     end-if
+   end-do
+end-do
+
+! Set supply and demand for client nodes (Each client has a demand of 1 and no supply)
+forall (i in districts) do
+	supply(i):= 0
+	demand(i):= 1
+end-do
+
+!For supply nodes: demand is zero and a large number for supply except of centre 5 & 12 that have limited capacities
+forall (j in districts) do
+ if (j=1 or j=5 or j=12 or j=17 or j=18 or j=31) then
+	demand(j):= 0
+ end-if
+ if (j=1 or j=17 or j=18 or j=31) then
+	supply(j):= 1000000000000000 !set a huge number since no capacity constraint for the specific depots
+ end-if
+end-do
+
+supply(5):= 6
+supply(12):= 7
+
+!not allow connection when length(i,j)=0
+forall(i in districts) do
+   forall(j in districts) do
+     if(length(i,j)=0) then
+       flow(i,j)=0
+     end-if
+   end-do
+end-do
+
+!Supply node constraint
+forall(i in districts) do
+   if(demand(i)<1) then
+     sum(j in districts|exists(flow(i,j))) flow(i,j)<=supply(i)
+     sum(j in districts|exists(flow(j,i))) flow(j,i)=0   !inbound flows equal to zero
+   end-if
+end-do
+
+!Demand node constraint
+forall(i in districts) do
+   if(demand(i)>0) then
+     sum(j in districts|exists(flow(j,i))) flow(j,i)=demand(i)*connected(i)
+     sum(j in districts|exists(flow(i,j))) flow(i,j)=0 !outbound flows equal to zero
+    end-if
+end-do
+
+
+! Objective function minimize the total distance walked:
+obj:= sum(i in districts,j in districts|exists(flow(i,j))) length(i,j)*flow(i,j)
+
+minimize(obj)
+
+! Print out results:
+fopen("Results_Part2_b.csv",F_OUTPUT)
+!Print the number of clients per centre
+forall (i in districts) do
+	z:=0
+	forall (j in districts|exists(flow(i,j))) do
+	   if (getsol(flow(i,j))=1) then
+	       z:=z+1
+	  end-if
+	 end-do
+	 if (z <> 0) then
+	  writeln("Centre: ",i,","," Number of clients: ",z)
+	  end-if
+end-do
+
+writeln
+writeln("Connections between centres and clients: ")
+forall (i in districts,j in districts|exists(flow(i,j))) do
+	!Print only if flow is 1:
+	if (getsol(flow(i,j))=1) then
+		writeln("Centre: ",i, ","," Client: ",j)
+	end-if
+end-do
+fclose(F_OUTPUT)
+
+end-model
