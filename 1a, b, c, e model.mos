@@ -1,0 +1,255 @@
+!@encoding CP1253
+model ModelName
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+
+!sample declarations section
+declarations
+
+points=1..500  !we want 500 clear data points to build the model
+columns=1..13 !number of attributes we want to read
+attributes=1..10  !number of independent attributes
+points_further=1..100 !further 100 data points to test the model built
+
+a1: array(attributes) of mpvar	!Regression coefficient variable for model 1
+b1: mpvar	!Regression coefficient variable for model 1
+error1: array(points) of mpvar	!For each data point, we need one such variable for model 1
+a2: array(attributes) of mpvar	!Regression coefficient variable for model 2
+b2: mpvar	!Regression coefficient variable for model 2
+error2: array(points) of mpvar	!For each data point, we need one such variable for model 2
+
+
+x: array(points, columns) of real	!data values for all attributes
+data: array(points, attributes) of real	!data values for 10  independent attributes
+y: array(points) of real !data values for dependent variable -temperature
+
+
+xtest: array(points_further, columns) of real	!test data values for 10 attributes
+datatest: array(points_further, attributes) of real	!test data values for 10 attributes
+ytest: array(points_further) of real !data values for dependent variable -temperature
+
+!errors for test set
+error_p1: array(points_further) of real
+error_p2: array(points_further) of real
+error_test1: array(points_further) of real
+
+
+row,L,mv: integer
+num1,num2: string
+num3, tol: real
+end-declarations
+
+!First read the data file:
+fopen("AirQualityUCI.txt",F_INPUT)
+
+row:=1
+L:=0 !saving clean values
+readln	!skip the header line
+!Now read each line for data points and save only the clean values:
+while (row<=500) do
+   read(num1,"	",num2,"	")
+   mv:=0
+   forall (i in columns) do
+	 read(x(row,i),";")
+	 if (x(row,i)=-200) then
+ 	     mv:=mv+1
+	     L:=L+1
+	 end-if
+    end-do
+	if (mv=0) then
+		row:=row+1
+	end-if
+    readln
+end-do
+
+
+!Test Set with further 100 valid data points
+row2:=1
+L2:=0 !saving clean rows
+!Now read each line for data points and save only the clean values:
+while (row2<=100) do
+   read(num1,"	",num2,"	")
+   mv:=0
+   forall (i in columns) do
+	 read(xtest(row2,i),";")
+	 if (xtest(row2,i)=-200) then
+ 	     mv:=mv+1
+	     L2:=L2+1
+	 end-if
+    end-do
+	if (mv=0) then
+		row2:=row2+1
+	end-if
+    readln
+end-do
+
+fclose(F_INPUT)
+
+writeln(" clean values: ", L)
+writeln(" passed rows: ", row)
+writeln(" clean values: ", L2)
+writeln(" passed rows: ", row2)
+
+!Set tolerance value
+tol:= 0.05
+
+!Split Label from attributes
+!y values - temperature as target variable
+forall(i in points) do
+  y(i):= x(i,11)
+end-do
+
+!x values - independent variables
+forall(i in points) do
+  forall(j in attributes) do
+    data(i,j):= x(i,j)
+  end-do
+end-do
+
+
+!Model 1 minimising the sum of errors
+
+! Objective function model 1:
+obj:= sum (i in points) error1(i)
+
+!regression line 1
+forall(i in points) do
+  pred1(i):=(sum(j in attributes) a1(j)*data(i,j)) + b1
+end-do
+
+!Sets of constraints for each data point including tolerance
+forall (i in points) do
+	pred1(i) - y(i)*(1+tol) <= error1(i)
+	y(i)*(1-tol) - pred1(i) <= error1(i)
+end-do
+
+!Set alpha and beta free
+forall(i in attributes) do
+  a1(i) is_free
+end-do
+b1 is_free
+
+! Solve the model 1:
+minimize(obj)
+
+!Save maximum error of model 1
+maxerror1:=0.000
+forall (i in points) do
+    if (getsol(error1(i))>= maxerror1) then
+			maxerror1:= getsol(error1(i))
+		end-if
+end-do
+
+! Print out results of model 1:
+fopen("Results_Part1_Group5.txt",F_OUTPUT)
+
+writeln("Model 1")
+writeln("Max error of model 1:	",maxerror1)
+writeln("b = 	",getsol(b1))
+forall (j in attributes) do
+	writeln("a",j," =	",getsol(a1(j)))
+end-do
+writeln
+
+fclose(F_OUTPUT)
+
+
+!Model 2: Minimising the maximum error
+
+!regression line 2
+forall(i in points) do
+  pred2(i):=(sum(j in attributes) a2(j)*data(i,j)) + b2
+end-do
+
+!Sets of constraints for each data point including tolerance
+forall (i in points) do
+	pred2(i) - y(i)*(1+tol) <= error2(i)
+	y(i)*(1-tol) - pred2(i) <= error2(i)
+end-do
+
+!Set alpha and beta free
+forall(i in attributes) do
+  a2(i) is_free
+end-do
+b2 is_free
+
+! Solve the model 2:
+forall (i in points) do
+   minimise(error2(i))
+end-do
+
+! Save maximum error of model 2
+maxerror2:=0.000
+forall (i in points) do
+    if (getsol(error2(i))>= maxerror2) then
+			maxerror2:= getsol(error2(i))
+		end-if
+end-do
+
+! Print out results of model 2:
+fopen("Results_Part1_Group5.txt",F_OUTPUT+F_APPEND)
+
+writeln("Model 2")
+writeln("Max error of model 2:	",maxerror2)
+writeln("b = 	",getsol(b2))
+forall (j in attributes) do
+	writeln("a",j," =	",getsol(a2(j)))
+end-do
+writeln
+
+fclose(F_OUTPUT+F_APPEND)
+
+!Predictions on Test set based on model 1 - minimizing sum of errors
+
+!Split Label from attributes for the test set
+!y values - test set
+forall(i in points_further) do
+  ytest(i):= xtest(i,11)
+end-do
+
+!x values - test set
+forall(i in points_further) do
+  forall(j in attributes) do
+    datatest(i,j):= xtest(i,j)
+  end-do
+end-do
+
+!calculate the errors
+forall (i in points_further) do
+    ! caluculate the error in two case
+    error_p1(i):=ytest(i)*(1-tol) -((sum(j in attributes) getsol(a1(j))*xtest(i,j))+getsol(b1))
+    error_p2(i):=(sum(j in attributes) getsol(a1(j))*xtest(i,j))+getsol(b1) - ytest(i)*(1+tol)
+
+    ! convert error into positive number
+    if error_p1(i)<0 then
+        error_p1(i):=-error_p1(i)
+    end-if
+    if error_p2(i)<0 then
+        error_p2(i):=-error_p2(i)
+    end-if
+
+    ! save the smaller one
+    if error_p1(i) < error_p2(i) then
+        error_test1(i) := error_p1(i)
+    else
+        error_test1(i) := error_p2(i)
+    end-if
+end-do
+!output the results
+fopen("Part1_testing_results_Group5.txt",F_OUTPUT)
+
+    writeln("The further 100 error values are shown below:")
+
+    writeln
+    !output the alphas
+    writeln
+    forall (i in points_further) do
+        if error_test1(i)<>0 then
+            writeln("The ",i,"th error: ",error_test1(i))
+        end-if
+    end-do
+
+    writeln("This is the end of the output.")
+
+fclose(F_OUTPUT)
+
+end-model
